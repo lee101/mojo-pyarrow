@@ -20,8 +20,9 @@ from std.math import (
     sqrt,
     tan,
 )
-from std.algorithm import map
+from max.algorithm import parallelize
 from std.bit import count_trailing_zeros
+from std.memory import stack_allocation
 from std.sys.info import simd_width_of
 
 comptime F64 = UnsafePointer[Float64, AnyOrigin[mut=True]]
@@ -33,6 +34,7 @@ comptime I64_MAX = Int64(9223372036854775807)
 comptime I64_MIN = Int64(-9223372036854775808)
 comptime PARALLEL_THRESHOLD = 262144
 comptime PARALLEL_GRAIN = 65536
+comptime VARIANCE_TASKS = 16
 
 
 def fp(addr: Int) -> F64:
@@ -79,6 +81,53 @@ def copy_validity(bitmap_addr: Int, offset: Int, n: Int, dst: Bits):
         set_bit(dst, i, valid(bitmap_addr, offset, i))
 
 
+def binary_f64_dense_range(
+    a: F64,
+    a_offset: Int,
+    a_step: Int,
+    b: F64,
+    b_offset: Int,
+    b_step: Int,
+    start: Int,
+    stop: Int,
+    dst: F64,
+    op: Int,
+):
+    var i = start
+    while i + W <= stop:
+        var av = (
+            SIMD[DType.float64, W](a[a_offset])
+            if a_step == 0
+            else a.load[width=W](a_offset + i)
+        )
+        var bv = (
+            SIMD[DType.float64, W](b[b_offset])
+            if b_step == 0
+            else b.load[width=W](b_offset + i)
+        )
+        if op == 0:
+            dst.store(i, av + bv)
+        elif op == 1:
+            dst.store(i, av - bv)
+        elif op == 2:
+            dst.store(i, av * bv)
+        else:
+            dst.store(i, av / bv)
+        i += W
+    while i < stop:
+        var av = a[a_offset + i * a_step]
+        var bv = b[b_offset + i * b_step]
+        if op == 0:
+            dst[i] = av + bv
+        elif op == 1:
+            dst[i] = av - bv
+        elif op == 2:
+            dst[i] = av * bv
+        else:
+            dst[i] = av / bv
+        i += 1
+
+
 def binary_f64(
     a: F64,
     a_bitmap: Int,
@@ -98,26 +147,23 @@ def binary_f64(
         fill_valid(dst_bitmap, n)
     var i = 0
     if dense and op < 4:
-        while i + W <= n:
-            var av = (
-                SIMD[DType.float64, W](a[a_offset])
-                if a_step == 0
-                else a.load[width=W](a_offset + i)
+        if n >= PARALLEL_THRESHOLD:
+            var tasks = (n + PARALLEL_GRAIN - 1) // PARALLEL_GRAIN
+
+            def work(task: Int) capturing:
+                var start = task * PARALLEL_GRAIN
+                var stop = min(start + PARALLEL_GRAIN, n)
+                binary_f64_dense_range(
+                    a, a_offset, a_step, b, b_offset, b_step,
+                    start, stop, dst, op,
+                )
+
+            parallelize[work](tasks, min(tasks, 16))
+        else:
+            binary_f64_dense_range(
+                a, a_offset, a_step, b, b_offset, b_step, 0, n, dst, op,
             )
-            var bv = (
-                SIMD[DType.float64, W](b[b_offset])
-                if b_step == 0
-                else b.load[width=W](b_offset + i)
-            )
-            if op == 0:
-                dst.store(i, av + bv)
-            elif op == 1:
-                dst.store(i, av - bv)
-            elif op == 2:
-                dst.store(i, av * bv)
-            else:
-                dst.store(i, av / bv)
-            i += W
+        return
     while i < n:
         var ai = i * a_step
         var bi = i * b_step
@@ -322,7 +368,7 @@ def unary_f64(
                 var stop = min(start + PARALLEL_GRAIN, n)
                 unary_f64_dense_range(values, offset, start, stop, dst, op)
 
-            map[work](tasks)
+            parallelize[work](tasks, min(tasks, 16))
         else:
             unary_f64_dense_range(values, offset, 0, n, dst, op)
         return
@@ -453,7 +499,7 @@ def compare_f64(
                     start, stop, dst, dst_bitmap, op,
                 )
 
-            map[work](tasks)
+            parallelize[work](tasks, min(tasks, 16))
         else:
             compare_dense_f64_bytes(
                 a, a_offset, a_step, b, b_offset, b_step,
@@ -594,7 +640,7 @@ def compare_i64(
                     start, stop, dst, dst_bitmap, op,
                 )
 
-            map[work](tasks)
+            parallelize[work](tasks, min(tasks, 16))
         else:
             compare_dense_i64_bytes(
                 a, a_offset, a_step, b, b_offset, b_step,
@@ -792,6 +838,77 @@ def minmax_i64(
 def variance_f64(
     values: F64, bitmap_addr: Int, offset: Int, n: Int, ddof: Int
 ) -> Float64:
+    if bitmap_addr == 0:
+        var anchor = values[offset]
+        if n >= PARALLEL_THRESHOLD:
+            var partials = stack_allocation[VARIANCE_TASKS, Float64]()
+
+            def sum_work(task: Int) capturing:
+                var start = task * n // VARIANCE_TASKS
+                var stop = (task + 1) * n // VARIANCE_TASKS
+                var sum_delta = SIMD[DType.float64, W](0.0)
+                var i = start
+                while i + W <= stop:
+                    sum_delta += values.load[width=W](offset + i) - anchor
+                    i += W
+                var total_delta = sum_delta.reduce_add()
+                while i < stop:
+                    total_delta += values[offset + i] - anchor
+                    i += 1
+                partials[task] = total_delta
+
+            parallelize[sum_work](VARIANCE_TASKS, VARIANCE_TASKS)
+            var total_delta = 0.0
+            for task in range(VARIANCE_TASKS):
+                total_delta += partials[task]
+            var mean = anchor + total_delta / Float64(n)
+
+            def squared_work(task: Int) capturing:
+                var start = task * n // VARIANCE_TASKS
+                var stop = (task + 1) * n // VARIANCE_TASKS
+                var sum_squared = SIMD[DType.float64, W](0.0)
+                var i = start
+                while i + W <= stop:
+                    var delta = values.load[width=W](offset + i) - mean
+                    sum_squared += delta * delta
+                    i += W
+                var m2 = sum_squared.reduce_add()
+                while i < stop:
+                    var delta = values[offset + i] - mean
+                    m2 += delta * delta
+                    i += 1
+                partials[task] = m2
+
+            parallelize[squared_work](VARIANCE_TASKS, VARIANCE_TASKS)
+            var m2 = 0.0
+            for task in range(VARIANCE_TASKS):
+                m2 += partials[task]
+            return m2 / Float64(n - ddof)
+
+        var sum_delta = SIMD[DType.float64, W](0.0)
+        var i = 0
+        while i + W <= n:
+            sum_delta += values.load[width=W](offset + i) - anchor
+            i += W
+        var total_delta = sum_delta.reduce_add()
+        while i < n:
+            total_delta += values[offset + i] - anchor
+            i += 1
+        var mean = anchor + total_delta / Float64(n)
+
+        var sum_squared = SIMD[DType.float64, W](0.0)
+        i = 0
+        while i + W <= n:
+            var delta = values.load[width=W](offset + i) - mean
+            sum_squared += delta * delta
+            i += W
+        var m2 = sum_squared.reduce_add()
+        while i < n:
+            var delta = values[offset + i] - mean
+            m2 += delta * delta
+            i += 1
+        return m2 / Float64(n - ddof)
+
     var count = 0.0
     var mean = 0.0
     var m2 = 0.0
@@ -940,7 +1057,7 @@ def if_else_f64(
                     start, stop, dst, dst_bitmap,
                 )
 
-            map[work](tasks)
+            parallelize[work](tasks, min(tasks, 16))
         else:
             if_else_dense_f64_bytes(
                 cond, cond_offset, cond_step,
@@ -1040,7 +1157,7 @@ def if_else_i64(
                     start, stop, dst, dst_bitmap,
                 )
 
-            map[work](tasks)
+            parallelize[work](tasks, min(tasks, 16))
         else:
             if_else_dense_i64_bytes(
                 cond, cond_offset, cond_step,

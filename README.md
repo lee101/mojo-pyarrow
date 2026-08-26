@@ -94,33 +94,38 @@ with `MOJO_PYARROW_LIB=/path/to/libmojo-pyarrow.so`.
 ## Performance
 
 Measured on an Intel Xeon E5-2697 v4 system with 72 logical CPUs, Mojo
-`1.0.0b3.dev2026072406`, PyArrow 25.0.0, and five million elements. Each number
+`1.1.0.dev2026081105`, PyArrow 25.0.0, and five million elements. Each number
 is the best of five warm runs produced by `pixi run bench`, whose task holds a
 machine-wide file lock.
 
 | kernel | mojo-pyarrow | pyarrow | relative |
 | --- | ---: | ---: | ---: |
-| `add, array + array (5M)` | 14.28 ms | 20.41 ms | 1.43x faster |
-| `multiply, array * scalar (5M)` | 14.55 ms | 14.46 ms | 0.99x slower |
-| `sin (5M)` | 9.69 ms | 78.22 ms | 8.07x faster |
-| `sum, dense float64 (5M)` | 4.46 ms | 4.64 ms | 1.04x faster |
-| `sum, 10% nulls (5M)` | 12.73 ms | 18.50 ms | 1.45x faster |
-| `mean, int64 (5M)` | 5.28 ms | 6.07 ms | 1.15x faster |
-| `variance, dense (5M)` | 38.88 ms | 11.64 ms | 0.30x slower |
-| `greater than scalar (5M)` | 2.36 ms | 5.47 ms | 2.32x faster |
-| `cumulative_sum (5M)` | 15.62 ms | 21.00 ms | 1.34x faster |
-| `if_else (5M)` | 6.49 ms | 45.60 ms | 7.03x faster |
-| `filter, about 50% kept (5M)` | 9.78 ms | 29.52 ms | 3.02x faster |
+| `add, array + array (5M)` | 5.29 ms | 13.52 ms | 2.55x faster |
+| `multiply, array * scalar (5M)` | 3.09 ms | 10.23 ms | 3.31x faster |
+| `sin (5M)` | 18.88 ms | 89.24 ms | 4.73x faster |
+| `sum, dense float64 (5M)` | 2.94 ms | 3.42 ms | 1.16x faster |
+| `sum, 10% nulls (5M)` | 12.67 ms | 18.61 ms | 1.47x faster |
+| `mean, int64 (5M)` | 4.34 ms | 5.26 ms | 1.21x faster |
+| `variance, dense (5M)` | 0.70 ms | 8.66 ms | 12.34x faster |
+| `greater than scalar (5M)` | 3.31 ms | 4.81 ms | 1.46x faster |
+| `cumulative_sum (5M)` | 14.18 ms | 21.42 ms | 1.51x faster |
+| `if_else (5M)` | 7.15 ms | 33.49 ms | 4.68x faster |
+| `filter, about 50% kept (5M)` | 9.07 ms | 19.79 ms | 2.18x faster |
 
-Dense transcendental, comparison, and selection loops stay serial below
-262,144 rows and use the Mojo CPU parallel runtime above that threshold.
+Dense arithmetic, transcendental, comparison, variance, and selection loops
+stay serial below 262,144 rows and use the Mojo CPU parallel runtime above that
+threshold.
 Comparisons use native-width SIMD loads and comparisons, then pack their lane
 results into Arrow bitmaps with a scalar remainder. Dense filtering walks set
-bits in the selection bitmap instead of testing every row. Basic arithmetic is
-roughly even in this run. The numerically stable variance kernel is
-substantially slower than PyArrow and is reported without adjustment.
+bits in the selection bitmap instead of testing every row. Dense variance uses
+an anchored, numerically stable two-pass SIMD reduction with stack-resident
+parallel partials; nullable variance retains Welford's recurrence.
 
-A GPU path is intentionally not included or benchmarked.
+A GPU path was evaluated with 14,095 MiB free and is intentionally not included
+or benchmarked. The only compute-bound candidate here is `sin`, and the pinned
+Mojo NVIDIA backend rejects float64 `sin`; using float32 would violate the
+existing parity tolerance. The remaining kernels are bandwidth-bound and do
+not have enough arithmetic intensity to justify host/device copies.
 
 Run `pixi run bench` on the target machine before making a deployment choice;
 memory bandwidth and Arrow allocator state materially affect these kernels.

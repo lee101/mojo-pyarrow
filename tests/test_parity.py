@@ -327,6 +327,7 @@ def test_dense_simd_and_filter_tails():
         * 2
         + [True]
     )
+    assert_result_equal(pc.add(values, other), upstream.add(values, other))
     assert_result_equal(pc.greater(values, other), upstream.greater(values, other))
     assert_result_equal(pc.filter(values, mask), upstream.filter(values, mask))
 
@@ -336,6 +337,10 @@ def test_serial_and_parallel_threshold_paths(length):
     values = pa.array(np.linspace(-1.0, 1.0, length))
     other = pa.array(np.linspace(1.0, -1.0, length))
     condition = upstream.greater(values, 0.0)
+    assert_result_equal(pc.add(values, 0.25), upstream.add(values, 0.25))
+    assert_result_equal(
+        pc.variance(values), upstream.variance(values), rtol=2e-10
+    )
     assert_result_equal(pc.sin(values), upstream.sin(values))
     assert_result_equal(pc.greater(values, 0.0), condition)
     assert_result_equal(
