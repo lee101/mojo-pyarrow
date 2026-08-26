@@ -20,7 +20,7 @@ from std.math import (
     sqrt,
     tan,
 )
-from std.algorithm import parallelize
+from std.algorithm import map
 from std.bit import count_trailing_zeros
 from std.sys.info import simd_width_of
 
@@ -322,7 +322,7 @@ def unary_f64(
                 var stop = min(start + PARALLEL_GRAIN, n)
                 unary_f64_dense_range(values, offset, start, stop, dst, op)
 
-            parallelize[work](tasks)
+            map[work](tasks)
         else:
             unary_f64_dense_range(values, offset, 0, n, dst, op)
         return
@@ -453,7 +453,7 @@ def compare_f64(
                     start, stop, dst, dst_bitmap, op,
                 )
 
-            parallelize[work](tasks)
+            map[work](tasks)
         else:
             compare_dense_f64_bytes(
                 a, a_offset, a_step, b, b_offset, b_step,
@@ -594,7 +594,7 @@ def compare_i64(
                     start, stop, dst, dst_bitmap, op,
                 )
 
-            parallelize[work](tasks)
+            map[work](tasks)
         else:
             compare_dense_i64_bytes(
                 a, a_offset, a_step, b, b_offset, b_step,
@@ -940,7 +940,7 @@ def if_else_f64(
                     start, stop, dst, dst_bitmap,
                 )
 
-            parallelize[work](tasks)
+            map[work](tasks)
         else:
             if_else_dense_f64_bytes(
                 cond, cond_offset, cond_step,
@@ -1040,7 +1040,7 @@ def if_else_i64(
                     start, stop, dst, dst_bitmap,
                 )
 
-            parallelize[work](tasks)
+            map[work](tasks)
         else:
             if_else_dense_i64_bytes(
                 cond, cond_offset, cond_step,
