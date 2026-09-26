@@ -50,7 +50,7 @@ The 86 parity tests compare results and types against PyArrow 25 on the same
 inputs. They include null-selection behavior, aggregation options, integer
 division semantics, NaN and infinity, empty arrays, all-null arrays, mixed
 numeric types, non-byte-aligned sliced validity bitmaps, SIMD tails, and both
-sides of the parallel execution threshold. They also cover stable variance for
+sides of the chunked execution threshold. They also cover stable variance for
 large-offset values and reject scalar values that would narrow or wrap at the
 FFI boundary.
 
@@ -113,13 +113,17 @@ machine-wide file lock.
 | `filter, about 50% kept (5M)` | 9.07 ms | 19.79 ms | 2.18x faster |
 
 Dense arithmetic, transcendental, comparison, variance, and selection loops
-stay serial below 262,144 rows and use the Mojo CPU parallel runtime above that
-threshold.
+stay serial below 262,144 rows and switch to a 65,536-row chunk loop above that
+threshold. These kernels stream: an elementwise op moves 16 bytes per element
+for at most one flop, comparison packs eight lanes into a byte for about one
+compare, and selection moves one condition bit plus one 8-byte value per
+element. None reaches the roughly two-flops-per-byte point where splitting the
+work across threads pays, so the chunk loop stays on the calling thread.
 Comparisons use native-width SIMD loads and comparisons, then pack their lane
 results into Arrow bitmaps with a scalar remainder. Dense filtering walks set
 bits in the selection bitmap instead of testing every row. Dense variance uses
-an anchored, numerically stable two-pass SIMD reduction with stack-resident
-parallel partials; nullable variance retains Welford's recurrence.
+an anchored, numerically stable two-pass SIMD reduction with per-chunk
+partials; nullable variance retains Welford's recurrence.
 
 A GPU path was evaluated with 14,095 MiB free and is intentionally not included
 or benchmarked. The only compute-bound candidate here is `sin`, and the pinned

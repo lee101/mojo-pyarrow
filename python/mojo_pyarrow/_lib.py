@@ -85,27 +85,6 @@ def build(force: bool = False) -> str:
 
 
 _loaded = None
-_parallel_device = None
-
-
-def _initialize_parallel_runtime(runtime: ctypes.CDLL) -> None:
-    global _parallel_device
-    if _parallel_device is not None:
-        return
-    # Mojo 1.1's index-based ``algorithm.map`` no longer exposes the legacy
-    # AsyncRT device initializer from shared libraries.  Older libraries that
-    # used ``parallelize`` still require it, so initialize it when available.
-    initialize = getattr(
-        runtime, "KGEN_CompilerRT_AsyncRT_GetOrCreateCPUDevice", None
-    )
-    if initialize is None:
-        return
-    initialize.argtypes = []
-    initialize.restype = ctypes.c_void_p
-    device = initialize()
-    if not device:
-        raise BuildError("failed to initialize the Mojo CPU parallel runtime")
-    _parallel_device = device
 
 
 def lib() -> ctypes.CDLL:
@@ -116,7 +95,6 @@ def lib() -> ctypes.CDLL:
             function = getattr(_loaded, name)
             function.argtypes = argtypes
             function.restype = restype
-        _initialize_parallel_runtime(_loaded)
     return _loaded
 
 

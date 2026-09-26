@@ -333,7 +333,7 @@ def test_dense_simd_and_filter_tails():
 
 
 @pytest.mark.parametrize("length", [262_143, 262_149])
-def test_serial_and_parallel_threshold_paths(length):
+def test_serial_and_chunked_threshold_paths(length):
     values = pa.array(np.linspace(-1.0, 1.0, length))
     other = pa.array(np.linspace(1.0, -1.0, length))
     condition = upstream.greater(values, 0.0)
