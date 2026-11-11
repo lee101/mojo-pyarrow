@@ -97,12 +97,12 @@ def binary_f64_dense_range(
         var av = (
             SIMD[DType.float64, W](a[a_offset])
             if a_step == 0
-            else a.load[width=W](a_offset + i)
+            else a.unsafe_load[width=W](a_offset + i)
         )
         var bv = (
             SIMD[DType.float64, W](b[b_offset])
             if b_step == 0
-            else b.load[width=W](b_offset + i)
+            else b.unsafe_load[width=W](b_offset + i)
         )
         if op == 0:
             dst.store(i, av + bv)
@@ -232,12 +232,12 @@ def binary_i64(
             var av = (
                 SIMD[DType.int64, WI](a[a_offset])
                 if a_step == 0
-                else a.load[width=WI](a_offset + i)
+                else a.unsafe_load[width=WI](a_offset + i)
             )
             var bv = (
                 SIMD[DType.int64, WI](b[b_offset])
                 if b_step == 0
-                else b.load[width=WI](b_offset + i)
+                else b.unsafe_load[width=WI](b_offset + i)
             )
             if op == 0:
                 dst.store(i, av + bv)
@@ -286,7 +286,7 @@ def unary_f64_dense_range(
 ):
     var i = start
     while i + W <= stop:
-        var v = values.load[width=W](offset + i)
+        var v = values.unsafe_load[width=W](offset + i)
         if op == 0:
             dst.store(i, -v)
         elif op == 1:
@@ -441,12 +441,12 @@ def compare_dense_f64_bytes(
             var av = (
                 SIMD[DType.float64, W](a[a_offset])
                 if a_step == 0
-                else a.load[width=W](a_offset + i)
+                else a.unsafe_load[width=W](a_offset + i)
             )
             var bv = (
                 SIMD[DType.float64, W](b[b_offset])
                 if b_step == 0
-                else b.load[width=W](b_offset + i)
+                else b.unsafe_load[width=W](b_offset + i)
             )
             var result = av.eq(bv)
             if op == 1:
@@ -580,12 +580,12 @@ def compare_dense_i64_bytes(
             var av = (
                 SIMD[DType.int64, WI](a[a_offset])
                 if a_step == 0
-                else a.load[width=WI](a_offset + i)
+                else a.unsafe_load[width=WI](a_offset + i)
             )
             var bv = (
                 SIMD[DType.int64, WI](b[b_offset])
                 if b_step == 0
-                else b.load[width=WI](b_offset + i)
+                else b.unsafe_load[width=WI](b_offset + i)
             )
             var result = av.eq(bv)
             if op == 1:
@@ -735,7 +735,7 @@ def sum_f64(values: F64, bitmap_addr: Int, offset: Int, n: Int) -> Float64:
         var acc = SIMD[DType.float64, W](0.0)
         var i = 0
         while i + W <= n:
-            acc += values.load[width=W](offset + i)
+            acc += values.unsafe_load[width=W](offset + i)
             i += W
         var total = acc.reduce_add()
         while i < n:
@@ -763,7 +763,7 @@ def mean_i64(values: I64, bitmap_addr: Int, offset: Int, n: Int) -> Float64:
         var acc = SIMD[DType.float64, WI](0.0)
         var i = 0
         while i + WI <= n:
-            acc += values.load[width=WI](offset + i).cast[DType.float64]()
+            acc += values.unsafe_load[width=WI](offset + i).cast[DType.float64]()
             i += WI
         var total = acc.reduce_add()
         while i < n:
@@ -840,7 +840,7 @@ def variance_f64(
                 var sum_delta = SIMD[DType.float64, W](0.0)
                 var i = start
                 while i + W <= stop:
-                    sum_delta += values.load[width=W](offset + i) - anchor
+                    sum_delta += values.unsafe_load[width=W](offset + i) - anchor
                     i += W
                 var total_delta = sum_delta.reduce_add()
                 while i < stop:
@@ -858,7 +858,7 @@ def variance_f64(
                 var sum_squared = SIMD[DType.float64, W](0.0)
                 var i = start
                 while i + W <= stop:
-                    var delta = values.load[width=W](offset + i) - mean
+                    var delta = values.unsafe_load[width=W](offset + i) - mean
                     sum_squared += delta * delta
                     i += W
                 var m2 = sum_squared.reduce_add()
@@ -875,7 +875,7 @@ def variance_f64(
         var sum_delta = SIMD[DType.float64, W](0.0)
         var i = 0
         while i + W <= n:
-            sum_delta += values.load[width=W](offset + i) - anchor
+            sum_delta += values.unsafe_load[width=W](offset + i) - anchor
             i += W
         var total_delta = sum_delta.reduce_add()
         while i < n:
@@ -886,7 +886,7 @@ def variance_f64(
         var sum_squared = SIMD[DType.float64, W](0.0)
         i = 0
         while i + W <= n:
-            var delta = values.load[width=W](offset + i) - mean
+            var delta = values.unsafe_load[width=W](offset + i) - mean
             sum_squared += delta * delta
             i += W
         var m2 = sum_squared.reduce_add()
@@ -972,7 +972,7 @@ def cast_i64_f64(
         while i + WI <= n:
             dst.store(
                 i,
-                values.load[width=WI](offset + i).cast[DType.float64](),
+                values.unsafe_load[width=WI](offset + i).cast[DType.float64](),
             )
             i += WI
     while i < n:
